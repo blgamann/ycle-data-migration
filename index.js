@@ -72,15 +72,19 @@ async function migrateCycles() {
       continue;
     }
 
+    // recycledFromId 및 recycledByUserId 매핑
     const recycledFromOldId = row.recycled_from;
     const recycledFromNewId = recycledFromOldId
       ? cycleIdMap.get(recycledFromOldId)
       : null;
 
+    const newRecycledByUserId = row.user_id ? userIdMap.get(row.user_id) : null;
+
     const insertRes = await destClient.query(
       `INSERT INTO public."Cycle" ("userId", reflection, medium, "imageUrl", "createdAt",
-        "eventDescription", "eventDate", "eventStartTime", "eventEndTime", "eventLocation", "recycledFromId")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "eventDescription", "eventDate", "eventStartTime", "eventEndTime", "eventLocation",
+        "recycledFromId", "recycledByUserId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         newUserId,
@@ -93,17 +97,23 @@ async function migrateCycles() {
         row.event_start_time ? row.event_start_time.toString() : null,
         row.event_end_time ? row.event_end_time.toString() : null,
         row.event_location,
-        recycledFromNewId,
+        null, // recycledFromId는 나중에 업데이트
+        newRecycledByUserId,
       ]
     );
 
+    // ID 매핑 저장
     cycleIdMap.set(row.id, insertRes.rows[0].id);
   }
 
   console.log(`사이클 데이터 마이그레이션 완료: ${cycleIdMap.size}개`);
+
+  // recycledFromId 업데이트
+  await updateRecycledFromId();
 }
 
 async function updateRecycledFromId() {
+  // 재순환(recycled_from) 관계 업데이트
   const res = await sourceClient.query(
     "SELECT id, recycled_from FROM public.cycles WHERE recycled_from IS NOT NULL"
   );
